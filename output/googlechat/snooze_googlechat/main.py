@@ -252,86 +252,52 @@ Example: _@{}_ *esc* severity = critical _Please check_""".format(display_name, 
         if self.snooze_url:
             link = '<{}/web/?#/record?tab=All&s=hash%3D{}|[Link]>'.format(self.snooze_url, record['hash'])
             snoozelink = '<{}/web/?#/snooze?tab=All&s=hash%3D{}|[Link]>'.format(self.snooze_url, record['hash'])
+
         if command in ['snooze', '/snooze']:
             LOG.debug("Snooze {} alerts with parameters: '{}'".format(len(aggregates), text))
-            duration_match = GoogleChatBot.duration_regex.search(text)
-            if duration_match:
-                try:
-                    now = datetime.now()
-                    time_constraints = {}
-                    conditions = []
-                    query = ''
-                    duration_time = duration_match.group(1)
-                    duration_number = duration_match.group(2)
-                    duration_period = duration_match.group(3)
-                    query_match = duration_match.group(4)
-                    if duration_time and duration_time == 'forever':
-                        later = None
-                        duration = 'Forever'
-                    elif duration_period:
-                        duration_period = duration_period.casefold()
-                        if duration_period.startswith('h'):
-                            later = now + timedelta(hours = int(duration_number))
-                            duration = duration_number + ' hour(s)'
-                        elif duration_period.startswith('d'):
-                            later = now + timedelta(days = int(duration_number))
-                            duration = duration_number + ' day(s)'
-                        elif duration_period.startswith('w'):
-                            later = now + timedelta(weeks = int(duration_number))
-                            duration = duration_number + ' week(s)'
-                        elif duration_period.startswith('month'):
-                            later = now + timedelta(days = int(duration_number)*30)
-                            duration = duration_number + ' month(s)'
-                        elif duration_period.startswith('m'):
-                            later = now + timedelta(minutes = int(duration_number))
-                            duration = duration_number + ' minute(s)'
-                        elif duration_period.startswith('y'):
-                            later = now + timedelta(days = int(duration_number)*365)
-                            duration = duration_number + ' year(s)'
-                        else:
-                            return parse_emoji("::cross-mark:: `{}`: Invalid snooze filter duration syntax. Use `/help_snooze` to learn how to use this command".format(display_name))
-                    else:
-                        later = now + timedelta(hours = 1)
-                        duration = '1h'
-                    if query_match:
-                        query = query_match
-                        conditions = [None]
-                    else:
-                        conditions = []
-                        for record in aggregates:
-                            conditions.append(['=', 'hash', '{}'.format(record['hash'])])
-                    if later:
-                        time_constraints = {"datetime": [{"from": now.astimezone().strftime("%Y-%m-%dT%H:%M:%S%z"), "until": later.astimezone().strftime("%Y-%m-%dT%H:%M:%S%z")}]}
-                    if len(conditions) <= self.snooze_limit:
-                        payload = [{'name': '[{}] {} ({})'.format(duration, display_name, str(uuid.uuid4())[:5]), 'condition': condition, 'ql': query, 'time_constraints': time_constraints, 'comment': display_name} for condition in conditions]
-                        result = self.client.snooze_batch(payload)
-                        if result.get('rejected'):
-                            return parse_emoji('::cross-mark:: `{}`: Could not Snooze alert(s)!'.format(display_name))
-                        LOG.debug('Done: {}'.format(result))
-                        ack_payload = [{'type': 'ack', 'record_uid': record['uid'], 'name': user, 'method': 'google', 'message': 'Snoozed for {}'.format(duration)} for record in aggregates]
-                        self.client.comment_batch(ack_payload)
-                        count = ''
-                        if len(aggregates) > 1:
-                            link = '<{}/web/?#/record?tab=Acknowledged|[Link]>'.format(self.snooze_url)
-                            snoozelink = '<{}/web/?#/snooze?tab=All|[Link]>'.format(self.snooze_url)
-                            count = '*{}* '.format(len(aggregates))
-                        comment_text = parse_emoji("::check-mark:: {}Alert(s) acknowledged successfully by `{}`! {}\n".format(count, display_name, link))
-                        warning_text = ''
-                        if len(result['data'].get('added', [])) > 0:
-                            res_cond = result['data']['added'][0].get('condition', [])
-                            if len(res_cond) > 0 and res_cond[0] == 'SEARCH':
-                                warning_text = parse_emoji("\n::warning:: Snooze filter condition `{}` might not be expected. Please double check in the Web interface".format(res_cond))
-                        if later:
-                            return comment_text + parse_emoji('::check-mark::') + ' Snoozed for {}! Expires at *{}* {}'.format(duration, later.strftime(self.date_format), snoozelink) + warning_text
-                        else:
-                            return comment_text + parse_emoji('::check-mark::') + ' Snoozed forever! {}'.format(snoozelink) + warning_text
-                    else:
-                        return parse_emoji('::cross-mark:: `{}`: Cannot Snooze more than {} alert(s) without using an explicit condition. Please try again or use <{}/web/?#/snooze|SnoozeWeb>.'.format(display_name, self.snooze_limit, self.snooze_url))
-                except Exception as e:
-                    LOG.exception(e)
-                    return parse_emoji('::cross-mark:: `{}`: Could not Snooze alert(s)!'.format(display_name))
-            else:
-                return "`{}`: Invalid Snooze filter syntax. Use `/help_snooze` to learn how to use this command".format(display_name)
+            if text == "":
+                return parse_emoji(f"::cross-mark:: `{text}`: Empty argument. Usage `/snooze <integer>` (the integer represent the number of hours to snooze)")
+            try:
+                hours = int(text)
+            except ValueError:
+                return parse_emoji(f"::cross-mark:: `{text}`: Invalid argument. Usage `/snooze <integer>`")
+            if hours < 0:
+                return parse_emoji(f"::cross-mark:: `{hours}`: First argument must be a positive number.")
+            if hours > 24:
+                return parse_emoji(f"::cross-mark:: `{hours}`: First argument must be 24 or less (hours)")
+            now = datetime.now()
+            later = now + timedelta(hours=hours)
+            time_constraints = {
+                "datetime": [
+                    {
+                        "from": now.astimezone().strftime(r"%Y-%m-%dT%H:%M:%S%z"),
+                        "until": later.astimezone().strftime(r"%Y-%m-%dT%H:%M:%S%z"),
+                    }
+                ]
+            }
+            conditions = []
+            for record in aggregates:
+                conditions.append(['=', 'hash', str(record['hash'])])
+            actions = []
+            for condition in conditions:
+                uid = str(uuid.uuid4())[:5]
+                action = {
+                    'name': f"[{hours} hours] {comment} ({uid})",
+                    'condition': condition,
+                    'ql': query,
+                    'time_constraints': time_contraints,
+                    'comment': comment,
+                }
+                actions.append(action)
+            try:
+                resp = self.client.snooze_batch(actions)
+            except Exception as err:
+                LOG.exception(err)
+                return parse_emoji('::cross-mark:: `{}`: Could not Snooze alert(s)!'.format(display_name))
+            if resp.get('rejected'):
+                return parse_emoji(f"::cross-mark:: `{comment}`: Could not find Snooze alert(s)!")
+            LOG.debug('Done: {}'.format(result))
+            return parse_emoji("::check-mark:: {}Alert(s) acknowledged successfully by `{}`! {}\n".format(count, display_name, link))
         elif command in ['ack', 'acknowledge', 'ok', '/ack']:
             LOG.debug('ACK {} alerts'.format(len(aggregates)))
             try:
